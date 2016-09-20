@@ -1,15 +1,22 @@
 CC=gcc
 
 CFLAGS = -g -c -Wall -pedantic
+#CFLAGS = -ansi -c -Wall -pedantic
 
-all: test
+all: rcp ncp
 
-test: test.o sendto_dbg.o
-	    $(CC) -o test test.o sendto_dbg.o  
+rcp: rcp.o
+	    $(CC) -o rcp rcp.o  
+
+ncp: ncp.o
+	    $(CC) -o ncp ncp.o
 
 clean:
 	rm *.o
-	rm test
+	rm ncp
+	rm rcp
 
 %.o:    %.c
 	$(CC) $(CFLAGS) $*.c
+
+
