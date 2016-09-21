@@ -15,6 +15,21 @@ int main(int argc, char **argv)
     struct sockaddr_in send_addr;
     char* str = "Hi ron!";
 
+    if (argc != 4) {
+        //break the code
+    }
+
+    int loss_rate_percent = strtol(argv[1], NULL, 10);
+    char* src_file_name = argv[2];
+    const char* at = "@";
+    char* dest_file_name = strtok(argv[3], at);
+    char* comp_name = strtok(NULL, at);
+
+    printf("%i", loss_rate_percent);
+    printf(src_file_name);
+    printf(dest_file_name);
+    printf(comp_name);
+
     sock = CreateSocket();
     PromptForHostName(my_name, host_name, NAME_LENGTH);
 
