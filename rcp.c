@@ -33,15 +33,26 @@ int main(int argc, char **argv)
 	  socklen_t from_len = sizeof(from_addr);
 	  int bytes = recvfrom( sock, mess_buf, sizeof(mess_buf), 0,
 				(struct sockaddr *)&from_addr, &from_len);
+	  //printf( "Received %d bytes\n", bytes );
+	  //printf( "1: %d, 2: %d, 3: %d, 4: %d", mess_buf[0], mess_buf[1], mess_buf[2], mess_buf[3] );
 	  mess_buf[bytes] = 0;
 	  int from_ip = from_addr.sin_addr.s_addr;
 
-	  printf( "Received from (%d.%d.%d.%d): %s\n", 
+	  /*unsigned int sn = 0;
+	  memcpy(&sn, mess_buf, sizeof(int));
+
+	  printf( "sn: %d", sn);*/
+
+	  struct dataMessage* msg = (struct dataMessage*) mess_buf;
+
+	  printf( "Sequence number: %d\n", (*msg).seqNo );
+
+	  /*printf( "Received from (%d.%d.%d.%d): %s\n", 
                                 (htonl(from_ip) & 0xff000000)>>24,
                                 (htonl(from_ip) & 0x00ff0000)>>16,
                                 (htonl(from_ip) & 0x0000ff00)>>8,
                                 (htonl(from_ip) & 0x000000ff),
-                                mess_buf );
+                                mess_buf );*/
 	}
       }
     }

@@ -9,14 +9,16 @@ int  CreateSocket();
 
 int main(int argc, char **argv)
 {
-    char host_name[NAME_LENGTH] = {'\0'};
     char my_name[NAME_LENGTH] = {'\0'};
     int sock;
     struct sockaddr_in send_addr;
-    char* str = "Hi ron!";
+    struct dataMessage dataMsg;
+    dataMsg.seqNo = 1024;
+    char* str = "Yo Ron sup.";
 
     if (argc != 4) {
-        //break the code
+      printf("Ncp: Wrong number of arguments");
+      exit(1);
     }
 
     int loss_rate_percent = strtol(argv[1], NULL, 10);
@@ -31,16 +33,16 @@ int main(int argc, char **argv)
     printf(comp_name);
 
     sock = CreateSocket();
-    PromptForHostName(my_name, host_name, NAME_LENGTH);
+    //PromptForHostName(my_name, host_name, NAME_LENGTH);
 
     struct hostent h_ent; 
-    struct hostent *p_h_ent = gethostbyname(host_name);
-    int host_num;
+    struct hostent *p_h_ent = gethostbyname(comp_name);
     if ( p_h_ent == NULL ) {
         printf("Ncp: gethostbyname error.\n");
         exit(1);
     }
 
+    int host_num;
     memcpy( &h_ent, p_h_ent, sizeof(h_ent));
     memcpy( &host_num, h_ent.h_addr_list[0], sizeof(host_num) );
 
@@ -48,7 +50,8 @@ int main(int argc, char **argv)
     send_addr.sin_addr.s_addr = host_num;
     send_addr.sin_port = htons(PORT);
     
-    sendto( sock, str, strlen(str), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+    sendto( sock, &dataMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+    //sendto( sock, str, strlen(str), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
 
 }
 
