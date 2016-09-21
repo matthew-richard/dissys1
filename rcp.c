@@ -18,6 +18,18 @@ int main(int argc, char **argv)
 
     sock = CreateSocket();
 
+    //file copy boiler plate code
+    FILE *fw;
+    char buf[CHUNK_SIZE];
+    int nwritten;
+
+    char* new_file = "new_file.txt";
+    if((fw = fopen(new_file, "w")) == NULL) {
+        perror("fopen");
+        exit(0);
+    }
+    
+
     FD_ZERO( &mask );
     FD_ZERO( &dummy_mask );
     FD_SET( sock, &mask);
@@ -45,7 +57,8 @@ int main(int argc, char **argv)
 
 	  struct dataMessage* msg = (struct dataMessage*) mess_buf;
 
-	  printf( "Sequence number: %d\n", (*msg).seqNo );
+	  
+      printf( "Sequence number: %d\n", (*msg).seqNo );
       printf("Data %s\n", msg->data );
 
 	  /*printf( "Received from (%d.%d.%d.%d): %s\n", 
