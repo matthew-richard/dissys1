@@ -13,21 +13,39 @@ int main(int argc, char **argv)
     int sock;
     struct sockaddr_in send_addr;
     struct dataMessage dataMsg;
-    dataMsg.seqNo = 1024;
-    char* str = "Yo Ron sup.";
 
+    //argument parsing
     if (argc != 4) {
       printf("Ncp: Wrong number of arguments");
       exit(1);
     }
-
     int loss_rate_percent = strtol(argv[1], NULL, 10);
     char* src_file_name = argv[2];
     const char* at = "@";
     char* dest_file_name = strtok(argv[3], at);
     char* comp_name = strtok(NULL, at);
 
-    printf("%i", loss_rate_percent);
+
+    FILE *fr; //file to be read
+    char buf[CHUNK_SIZE]; //buffer for file copy
+    int nread, nwritter;
+
+    if((fr = fopen(argv[2], "r")) == NULL) {
+        perror("fopen");
+        exit(0);
+    }
+
+    printf("Opened sample_file.txt for reading");
+    nread = fread(buf, 1 , CHUNK_SIZE, fr); //read in a chunk of the file
+
+    if(nread > 0) {
+        memcpy(dataMsg.data, buf, nread);
+    }
+
+    dataMsg.seqNo = 1024;
+    char* str = "Yo Ron sup.";
+
+        printf("%i", loss_rate_percent);
     printf(src_file_name);
     printf(dest_file_name);
     printf(comp_name);
