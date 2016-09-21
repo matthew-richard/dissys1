@@ -28,7 +28,7 @@ int main(int argc, char **argv)
 
     FILE *fr; //file to be read
     char buf[CHUNK_SIZE]; //buffer for file copy
-    int nread, nwritter;
+    int nread, nwritten;
 
     if((fr = fopen(argv[2], "r")) == NULL) {
         perror("fopen");
@@ -42,7 +42,11 @@ int main(int argc, char **argv)
         memcpy(dataMsg.data, buf, nread);
     }
 
+    fclose(fr);
+
     dataMsg.seqNo = 1024;
+    dataMsg.numBytes = nread;
+    printf("DataMsg numBytes is: %d\n ", dataMsg.numBytes);
     char* str = "Yo Ron sup.";
 
         printf("%i", loss_rate_percent);

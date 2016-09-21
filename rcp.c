@@ -21,7 +21,7 @@ int main(int argc, char **argv)
     //file copy boiler plate code
     FILE *fw;
     char buf[CHUNK_SIZE];
-    int nwritten;
+    int nwritten, nread;
 
     char* new_file = "new_file.txt";
     if((fw = fopen(new_file, "w")) == NULL) {
@@ -57,10 +57,20 @@ int main(int argc, char **argv)
 
 	  struct dataMessage* msg = (struct dataMessage*) mess_buf;
 
-	  
+      nread = msg->numBytes;
+      printf("%d\n", nread);
+      if(nread > 0) {
+          nwritten = fwrite(buf, 1, nread, fw);
+      }
+
+      if (nwritten < nread) {
+          printf("nwritten<nread\n");
+          exit(0);
+      }
       printf( "Sequence number: %d\n", (*msg).seqNo );
       printf("Data %s\n", msg->data );
 
+      fclose(fw);
 	  /*printf( "Received from (%d.%d.%d.%d): %s\n", 
                                 (htonl(from_ip) & 0xff000000)>>24,
                                 (htonl(from_ip) & 0x00ff0000)>>16,
