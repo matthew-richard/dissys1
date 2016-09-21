@@ -46,6 +46,7 @@ int main(int argc, char **argv)
 	  struct dataMessage* msg = (struct dataMessage*) mess_buf;
 
 	  printf( "Sequence number: %d\n", (*msg).seqNo );
+      printf("Data %s\n", msg->data );
 
 	  /*printf( "Received from (%d.%d.%d.%d): %s\n", 
                                 (htonl(from_ip) & 0xff000000)>>24,
