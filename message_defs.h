@@ -4,6 +4,7 @@
 
 struct dataMessage {
     unsigned int seqNo;
+    unsigned int numBytes;
     unsigned char data[CHUNK_SIZE];
 };
 
