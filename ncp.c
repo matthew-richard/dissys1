@@ -52,8 +52,29 @@ int main(int argc, char **argv)
     memcpy(connectMsg.data, dest_file_name, strlen(dest_file_name) + 1);
     printf("Connect message data field is %s\n", connectMsg.data);
 
+    //int responseNum = -3; //indicating we haven't yet heard anything from the receiver
     // Repeat send message until response
-    sendto( sock, &connectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+    //while( responseNum == -3 ) {
+    fd_set mask, dummy_mask, temp_mask;
+    struct timeval timeout;
+    timeout.tv_sec = TIMEOUT_SEC;
+    timeout.tv_usec = 0;
+    FD_ZERO( &mask );
+    FD_ZERO( &dummy_mask );
+    FD_SET( sock, &mask );
+
+    while( 1 ) {    
+        temp_mask = mask;
+        sendto( sock, &connectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+        int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
+        if (fd_num > 0) {
+            //determine if busy message (-2) or cack (-1)
+            //if cack, break, if busy, keep looping
+            //int bytes = recvfrom ( sock, mess_buf, sizeof(mess_buf), 0, (struct sockaddr *)&temp_addr, &from_len);
+            break; //we've received something! 
+        }
+        //receive somethingr, update reponseNum = 
+    }
     // If response is busy don't do anything, just keep listening for messages
     // If response is "Ok send me stuff", send the first data packet / start the whole loop and stuff
 
