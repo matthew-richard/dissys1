@@ -19,9 +19,10 @@ int back_index = 0;
 
 int CreateSocket();
 
-int AddToQueue(struct sockaddr_in &sender);
+int AddToQueue(struct sockaddr_in *sender);
 int PopFromQueue();
 int QueueEmpty();
+struct sockaddr_in* QueueFront();
 
 int main(int argc, char **argv)
 {
@@ -49,7 +50,7 @@ int main(int argc, char **argv)
       if (fd_num > 0) {
     if ( FD_ISSET( sock, &temp_mask ) ) {
 	  socklen_t from_len = sizeof(senders[front_index]);
-	  sockaddr_in temp_addr;
+	  struct sockaddr_in temp_addr;
 	  int bytes = recvfrom( sock, mess_buf, sizeof(mess_buf), 0,
 				(struct sockaddr *)&temp_addr, &from_len);
 	  struct dataMessage* msg = (struct dataMessage*) mess_buf;
@@ -59,7 +60,7 @@ int main(int argc, char **argv)
 		// Do processing 
 	  } else {
 		// 
-		AddToQueue(temp_addr);
+		AddToQueue(&temp_addr);
 		// send BUSY message
 	  }
 	  
@@ -97,6 +98,27 @@ int main(int argc, char **argv)
       }
     }
   }
+int PopFromQueue() {
+    front_index = (front_index + 1)%MAX_SENDERS;
+    return 1;
+}
+
+int AddToQueue(struct sockaddr_in *sender){
+    int i;
+    for (i = front_index; i < back_index; i = (i + 1) % MAX_SENDERS ) {
+        if (senders[i].sin_addr.s_addr == sender->sin_addr.s_addr) {
+            //check if sender is already in the queue
+            return 0;
+        }
+    }
+    senders[back_index] = *sender;
+    back_index = (back_index + 1)%MAX_SENDERS;
+    return 1;
+}
+struct sockaddr_in* QueueFront() {
+    return front_index == back_index ? NULL : &(senders[front_index]);
+}
+
 
 int CreateSocket() {
   struct sockaddr_in name;
