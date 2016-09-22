@@ -10,9 +10,11 @@ int  CreateSocket();
 int main(int argc, char **argv)
 {
     char my_name[NAME_LENGTH] = {'\0'};
-    int sock;
+    int sock = CreateSocket();
     struct sockaddr_in send_addr;
     struct dataMessage dataMsg;
+    struct dataMessage connectMsg;
+
 
     //argument parsing
     if (argc != 4) {
@@ -24,39 +26,8 @@ int main(int argc, char **argv)
     const char* at = "@";
     char* dest_file_name = strtok(argv[3], at);
     char* comp_name = strtok(NULL, at);
-
-
-    FILE *fr; //file to be read
-    char buf[CHUNK_SIZE]; //buffer for file copy
-    int nread, nwritten;
-
-    if((fr = fopen(argv[2], "r")) == NULL) {
-        perror("fopen");
-        exit(0);
-    }
-
-    printf("Opened sample_file.txt for reading");
-    nread = fread(buf, 1 , CHUNK_SIZE, fr); //read in a chunk of the file
-
-    if(nread > 0) {
-        memcpy(dataMsg.data, buf, nread);
-    }
-
-    fclose(fr);
-
-    dataMsg.seqNo = 1024;
-    dataMsg.numBytes = nread;
-    printf("DataMsg numBytes is: %d\n ", dataMsg.numBytes);
-    char* str = "Yo Ron sup.";
-
-        printf("%i", loss_rate_percent);
-    printf(src_file_name);
-    printf(dest_file_name);
-    printf(comp_name);
-
-    sock = CreateSocket();
-    //PromptForHostName(my_name, host_name, NAME_LENGTH);
-
+    
+    // Refactor
     struct hostent h_ent; 
     struct hostent *p_h_ent = gethostbyname(comp_name);
     if ( p_h_ent == NULL ) {
@@ -71,9 +42,52 @@ int main(int argc, char **argv)
     send_addr.sin_family = AF_INET;
     send_addr.sin_addr.s_addr = host_num;
     send_addr.sin_port = htons(PORT);
+    // end refactor
+
+    // Send connect message
+    connectMsg.seqNo = -1;
+    connectMsg.numBytes = strlen(dest_file_name) + 1;
+
+    // Copy dest_file_name string, including \0 at end.
+    memcpy(connectMsg.data, dest_file_name, strlen(dest_file_name) + 1);
+    printf("Connect message data field is %s\n", connectMsg.data);
+
+    sendto( sock, &connectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+
+
+    /* FILE *fr; //file to be read
+    char buf[CHUNK_SIZE]; //buffer for file copy
+    int nread, nwritten;
+
+    if((fr = fopen(argv[2], "r")) == NULL) {
+        perror("fopen");
+        exit(0);
+    }
+
+    printf("Opened file for reading");
+    nread = fread(buf, 1 , CHUNK_SIZE, fr); //read in a chunk of the file
+
+    if(nread > 0) {
+        memcpy(dataMsg.data, buf, nread);
+    }
+
+    fclose(fr);
+
+    dataMsg.seqNo = 0;
+    dataMsg.numBytes = nread;
+    printf("DataMsg numBytes is: %d\n ", dataMsg.numBytes);
+    char* str = "Yo Ron sup.";
+
+        printf("%i", loss_rate_percent);
+    printf(src_file_name);
+    printf(dest_file_name);
+    printf(comp_name);
+
+        //PromptForHostName(my_name, host_name, NAME_LENGTH);
     
     sendto( sock, &dataMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
     //sendto( sock, str, strlen(str), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+    */
 
 }
 
