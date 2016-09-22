@@ -52,10 +52,17 @@ int main(int argc, char **argv)
     memcpy(connectMsg.data, dest_file_name, strlen(dest_file_name) + 1);
     printf("Connect message data field is %s\n", connectMsg.data);
 
+    // Repeat send message until response
     sendto( sock, &connectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+    // If response is busy don't do anything, just keep listening for messages
+    // If response is "Ok send me stuff", send the first data packet / start the whole loop and stuff
 
+    
+    
 
-    /* FILE *fr; //file to be read
+    
+
+    FILE *fr; //file to be read
     char buf[CHUNK_SIZE]; //buffer for file copy
     int nread, nwritten;
 
@@ -65,29 +72,28 @@ int main(int argc, char **argv)
     }
 
     printf("Opened file for reading");
+
+
+    // start loop on window
     nread = fread(buf, 1 , CHUNK_SIZE, fr); //read in a chunk of the file
 
     if(nread > 0) {
         memcpy(dataMsg.data, buf, nread);
     }
 
-    fclose(fr);
-
     dataMsg.seqNo = 0;
     dataMsg.numBytes = nread;
     printf("DataMsg numBytes is: %d\n ", dataMsg.numBytes);
-    char* str = "Yo Ron sup.";
-
-        printf("%i", loss_rate_percent);
-    printf(src_file_name);
-    printf(dest_file_name);
-    printf(comp_name);
-
-        //PromptForHostName(my_name, host_name, NAME_LENGTH);
     
     sendto( sock, &dataMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
-    //sendto( sock, str, strlen(str), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
-    */
+
+    // end loop
+    
+
+
+    // Cleanup
+    fclose(fr);
+
 
 }
 
