@@ -3,28 +3,34 @@
 
 #define NAME_LENGTH 80
 #define TIMEOUT_SEC 10
+#define MAX_SENDERS 512
+#define WINDOW_SIZE 512
+
+int sock;
+fd_set mask, dummy_mask, temp_mask;
+char mess_buf[MAX_MESS_LEN];
+struct timeval timeout;
+FILE *fw = NULL;
+
+// Queue of senders. 
+struct sockaddr_in senders[MAX_SENDERS];
+int front_index = 0;
+int back_index = 0;
 
 int CreateSocket();
 
+int AddToQueue(struct sockaddr_in &sender);
+int PopFromQueue();
+int QueueEmpty();
+
 int main(int argc, char **argv)
 {
-    char host_name[NAME_LENGTH] = {'\0'};
-    char my_name[NAME_LENGTH] = {'\0'};
-    int sock;
-    struct sockaddr_in from_addr;
-    fd_set mask, dummy_mask, temp_mask;
-    char mess_buf[MAX_MESS_LEN];
-    struct timeval timeout;
-
     sock = CreateSocket();
 
     //file copy boiler plate code
-    FILE *fw;
-    char buf[CHUNK_SIZE];
     int nwritten, nread;
-
-    char* new_file = "new_file.txt";
-    if((fw = fopen(new_file, "w")) == NULL) {
+;
+    if((fw = fopen("new_file.txt", "w")) == NULL) {
         perror("fopen");
         exit(0);
     }
@@ -41,33 +47,43 @@ int main(int argc, char **argv)
 
       int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout );
       if (fd_num > 0) {
-	if ( FD_ISSET( sock, &temp_mask ) ) {
-	  socklen_t from_len = sizeof(from_addr);
+    if ( FD_ISSET( sock, &temp_mask ) ) {
+	  socklen_t from_len = sizeof(senders[front_index]);
+	  sockaddr_in temp_addr;
 	  int bytes = recvfrom( sock, mess_buf, sizeof(mess_buf), 0,
-				(struct sockaddr *)&from_addr, &from_len);
-	  //printf( "Received %d bytes\n", bytes );
-	  //printf( "1: %d, 2: %d, 3: %d, 4: %d", mess_buf[0], mess_buf[1], mess_buf[2], mess_buf[3] );
-	  mess_buf[bytes] = 0;
-	  int from_ip = from_addr.sin_addr.s_addr;
+				(struct sockaddr *)&temp_addr, &from_len);
+	  struct dataMessage* msg = (struct dataMessage*) mess_buf;
+
+
+	  if (temp_addr.sin_addr.s_addr == senders[front_index].sin_addr.s_addr) {
+		// Do processing 
+	  } else {
+		// 
+		AddToQueue(temp_addr);
+		// send BUSY message
+	  }
+	  
+	  
+	  //mess_buf[bytes] = 0;
+	  //int from_ip = from_addr.sin_addr.s_addr;
 
 	  /*unsigned int sn = 0;
 	  memcpy(&sn, mess_buf, sizeof(int));
 
 	  printf( "sn: %d", sn);*/
 
-	  struct dataMessage* msg = (struct dataMessage*) mess_buf;
 
       nread = msg->numBytes;
       printf("%d\n", nread);
       if(nread > 0) {
-          nwritten = fwrite(buf, 1, nread, fw);
+          nwritten = fwrite(msg->data, 1, nread, fw);
       }
 
       if (nwritten < nread) {
           printf("nwritten<nread\n");
           exit(0);
       }
-      printf( "Sequence number: %d\n", (*msg).seqNo );
+      printf( "Sequence number: %d\n", msg->seqNo );
       printf("Data %s\n", msg->data );
 
       fclose(fw);
