@@ -4,19 +4,17 @@
 #define NAME_LENGTH 80
 #define TIMEOUT_SEC 10
 
-void PromptForHostName( char *my_name, char *host_name, size_t max_len );
 int  CreateSocket();
 
 int main(int argc, char **argv)
 {
-    char my_name[NAME_LENGTH] = {'\0'};
     int sock = CreateSocket();
     struct sockaddr_in send_addr;
     struct dataMessage dataMsg;
     struct dataMessage connectMsg;
 
 
-    //argument parsing
+    // Parse arguments
     if (argc != 4) {
       printf("Ncp: Wrong number of arguments");
       exit(1);
@@ -27,7 +25,7 @@ int main(int argc, char **argv)
     char* dest_file_name = strtok(argv[3], at);
     char* comp_name = strtok(NULL, at);
     
-    // Refactor
+    // Resolve receiver IP address
     struct hostent h_ent; 
     struct hostent *p_h_ent = gethostbyname(comp_name);
     if ( p_h_ent == NULL ) {
@@ -42,9 +40,9 @@ int main(int argc, char **argv)
     send_addr.sin_family = AF_INET;
     send_addr.sin_addr.s_addr = host_num;
     send_addr.sin_port = htons(PORT);
-    // end refactor
 
-    // Send connect message
+
+    // Create connect message
     connectMsg.seqNo = -1;
     connectMsg.numBytes = strlen(dest_file_name) + 1;
 
@@ -52,9 +50,6 @@ int main(int argc, char **argv)
     memcpy(connectMsg.data, dest_file_name, strlen(dest_file_name) + 1);
     printf("Connect message data field is %s\n", connectMsg.data);
 
-    //int responseNum = -3; //indicating we haven't yet heard anything from the receiver
-    // Repeat send message until response
-    //while( responseNum == -3 ) {
     fd_set mask, dummy_mask, temp_mask;
     struct timeval timeout;
     timeout.tv_sec = TIMEOUT_SEC;
@@ -63,20 +58,40 @@ int main(int argc, char **argv)
     FD_ZERO( &dummy_mask );
     FD_SET( sock, &mask );
 
+    // Send connect message
+    sendto( sock, &connectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+    
+    // Confirm connection with receiver
+    int waiting = 0;
     while( 1 ) {    
         temp_mask = mask;
-        sendto( sock, &connectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
         int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (fd_num > 0) {
-            //determine if busy message (-2) or cack (-1)
-            //if cack, break, if busy, keep looping
-            //int bytes = recvfrom ( sock, mess_buf, sizeof(mess_buf), 0, (struct sockaddr *)&temp_addr, &from_len);
-            break; //we've received something! 
-        }
-        //receive somethingr, update reponseNum = 
+            recvfrom( sock, mess_buf, sizeof(mess_buf), 0, (struct sockaddr *)&temp_addr, &from_len);
+	    struct ackMessage * msg = (struct ackMessage *) mess_buff;
+
+	    if (msg->cAck == -2) {
+	      // receiver is busy. wait.
+	      continue;
+	    } else if (msg->cAck == -1) {
+	      // start sending data
+	      break;
+	    } else {
+	      perror("Ncp: Unrecognized cAck value\n");
+	      exit(1);
+	    }
+        } else {
+	  if (!waiting) {
+	    // On timeout, resend connect message
+	    sendto( sock, &connectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
+	  }
+	}
     }
-    // If response is busy don't do anything, just keep listening for messages
-    // If response is "Ok send me stuff", send the first data packet / start the whole loop and stuff
+
+    
+    // Open file
+
+    // Start sending data
 
     
     
@@ -115,28 +130,6 @@ int main(int argc, char **argv)
     // Cleanup
     fclose(fr);
 
-
-}
-
-void PromptForHostName( char *my_name, char *host_name, size_t max_len ) {
-
-    char *c;
-
-    gethostname(my_name, max_len );
-    printf("My host name is %s.\n", my_name);
-
-    printf( "\nEnter host to send to:\n" );
-    if ( fgets(host_name,max_len,stdin) == NULL ) {
-        perror("Ucast: read_name");
-        exit(1);
-    }
-    
-    c = strchr(host_name,'\n');
-    if ( c ) *c = '\0';
-    c = strchr(host_name,'\r');
-    if ( c ) *c = '\0';
-
-    printf( "Sending from %s to %s.\n", my_name, host_name );
 
 }
 

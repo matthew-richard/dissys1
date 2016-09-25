@@ -9,7 +9,7 @@ struct dataMessage {
 };
 
 struct ackMessage {
-	unsigned int cAck;
-	unsigned int nAcks[WINDOW_SIZE];
+    unsigned int cAck;
+    unsigned char nAcks[WINDOW_SIZE];
 };
 
