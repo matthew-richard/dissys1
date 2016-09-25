@@ -7,6 +7,7 @@
 
 int sock;
 fd_set mask, dummy_mask, temp_mask;
+char ip_str[16];
 char mess_buf[MAX_MESS_LEN];
 struct timeval timeout;
 FILE *fw = NULL;
@@ -15,7 +16,7 @@ FILE *fw = NULL;
 struct ackMessage ackMsg;
 
 // Queue of senders.
-struct sender { sockaddr_in addr; char file[NAME_LENGTH]; };
+struct sender { struct sockaddr_in addr; char file[NAME_LENGTH]; };
 struct sender senders[MAX_SENDERS];
 int front_index = 0;
 int back_index = 0;
@@ -27,23 +28,24 @@ int window_base = 0;
 int window_start = 0;
 
 int CreateSocket();
+char* IntToIP(int ip);
 
-int AddToQueue(struct sockaddr_in *sender);
+int AddToQueue(struct sender *sender);
 int PopFromQueue();
 struct sender * QueueFront();
 
 int main(int argc, char **argv)
 {
     sock = CreateSocket();
-    timeout.tv_sec = TIMEOUT_SEC;
-    timeout.tv_usec = 0;
-
+    
     FD_ZERO( &mask );
     FD_ZERO( &dummy_mask );
     FD_SET( sock, &mask);
     for(;;)
     {
       temp_mask = mask;
+	  timeout.tv_sec = TIMEOUT_SEC;
+	  timeout.tv_usec = 0;
 
       int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout );
       if (fd_num > 0) {
@@ -53,11 +55,12 @@ int main(int argc, char **argv)
 		  int bytes = recvfrom( sock, mess_buf, sizeof(mess_buf), 0,
 								(struct sockaddr *)&temp_addr, &from_len);
 		  struct dataMessage* msg = (struct dataMessage*) mess_buf;
-		  printf("Data: %s\n", msg->data);
 
 		  // Received disconnect message
 		  if (msg->seqNo == -2) {
-			if (QueueFront() != NULL && temp_addr.sin_addr.s_addr == QueueFront()->addr.sin_addr.s_addr) {
+			if (QueueFront() != NULL && temp_addr.sin_addr.s_addr == (QueueFront()->addr).sin_addr.s_addr) {		  
+			  printf("Disconnecting from sender %s (file %s)\n", IntToIP(temp_addr.sin_addr.s_addr), QueueFront()->file);
+			  
 			  PopFromQueue();
 			  fclose(fw);
 			  
@@ -67,46 +70,42 @@ int main(int argc, char **argv)
 				window_base = 0;
 				window_start = 0;
 			  }
-
+			  
 			  if (QueueFront() != NULL) {
+				printf("Now serving queued sender %s. Writing to file %s\n", IntToIP((QueueFront()->addr).sin_addr.s_addr), QueueFront()->file);
+
 				// Open file
 				if((fw = fopen(QueueFront()->file, "w")) == NULL) {
 				  perror("fopen");
 				  exit(0);
 				}
 
-				printf("Opened file %s\n", QueueFront()->file);
-
 				// Send ack
 				ackMsg.cAck = -1;
 				sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &(QueueFront()->addr), sizeof(QueueFront()->addr));
-				printf("Sent ACK message\n");
 			  }
 			}
 
 			// Send response regardless of whether this is the sender we're currently serving
-			struct ackMesssage disconnectMsg;
+			struct ackMessage disconnectMsg;
 			disconnectMsg.cAck = -3;
-			sendto( sock, disconnectMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &temp_addr, sizeof(temp_addr));
+			sendto( sock, &disconnectMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &temp_addr, sizeof(temp_addr));
 			continue;
 		  }
 
 
 		  if (QueueFront() == NULL) {
-			printf("Adding to queue\n");
 			struct sender sndr;
 			sndr.addr = temp_addr;
 			memcpy(sndr.file, msg->data, strlen(msg->data) + 1);
 			AddToQueue(&sndr);
+
+			printf("Now serving sender %s. Writing to file %s\n", IntToIP(temp_addr.sin_addr.s_addr), msg->data);
 		  }
 
 		  if (temp_addr.sin_addr.s_addr == QueueFront()->addr.sin_addr.s_addr) {
-			printf("IPs equal\n");
-			
 			if (msg->seqNo == -1) {
-			  // Connect message
-			  
-			  //printf("Seq no: %d\n", msg->seqNo);
+			  // Receiving connect message
 			  
 			  // Open file
 			  if((fw = fopen(msg->data, "w")) == NULL) {
@@ -114,15 +113,11 @@ int main(int argc, char **argv)
 				exit(0);
 			  }
 
-			  printf("Opened file %s\n", msg->data);
-
 			  // Send ack
 			  ackMsg.cAck = -1;
 			  sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &(QueueFront()->addr), sizeof(QueueFront()->addr));
-			  printf("Sent ACK message\n");
-		  
 			} else {
-			  // Data message
+			  // Receiving data message
 			  
 			  // Write to corresponding window slot (provided the sequence number is within the window)
 			  if (msg->seqNo >= window_base && msg->seqNo < window_base + WINDOW_SIZE) {
@@ -138,10 +133,14 @@ int main(int argc, char **argv)
 				  perror("nwritten < msg->numBytes\n");
 				  exit(0);
 				}
-				
+
 				window_base++;
 				window_received[window_start] = 0;
 				window_start = (window_start + 1) % WINDOW_SIZE;
+
+				if ( (window_base - 1) * CHUNK_SIZE % (1024 * 1024 * 100) == 0 ) { 
+				  printf("Cumulative Mbytes transferred: %d.  Rate (Mbits/sec): %d\n", (window_base - 1) * CHUNK_SIZE / (1024 * 1024), -1);
+				}
 			  }
 
 			  // Send cAcks and nAcks based on window state
@@ -152,21 +151,25 @@ int main(int argc, char **argv)
 			  sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &QueueFront()->addr, sizeof(QueueFront()->addr));
 			}
 		  } else {
-			// Queue this sender
-			AddToQueue(&temp_addr);
+			// Queue this sender (we'll serve them when we're not busy)
+			struct sender sndr;
+			sndr.addr = temp_addr;
+			memcpy(sndr.file, msg->data, strlen(msg->data) + 1);
+			AddToQueue(&sndr);
 			
 			// send BUSY message
 			struct ackMessage busyMsg;
 			busyMsg.cAck = -2;
 			sendto( sock, &busyMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &temp_addr, sizeof(temp_addr));
-			printf("Sent BUSY message\n");
+
+			printf("Queuing sender %s (file %s)\n", IntToIP(temp_addr.sin_addr.s_addr), msg->data);
 		  }
 		}
       } else {
 		// On timeout, resend previous message
 		if (QueueFront() != NULL) {
 		  sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &QueueFront()->addr, sizeof(QueueFront()->addr));
-		  printf("Timed out!\n");
+		  // printf("Timed out. Resending previous message.\n");
 		}
 	  }
     }
@@ -177,12 +180,12 @@ int PopFromQueue() {
     return 1;
 }
 
-int AddToQueue(struct sockaddr_in *sender){
+int AddToQueue(struct sender *sender){
     //check if sender is already in the queue
 
     int i;
     for (i = front_index; i < back_index; i = (i + 1) % MAX_SENDERS ) {
-      if (senders[i].sin_addr.s_addr == sender->sin_addr.s_addr) {
+      if (senders[i].addr.sin_addr.s_addr == sender->addr.sin_addr.s_addr) {
 	    return 0;
 	  }
     }
@@ -191,7 +194,7 @@ int AddToQueue(struct sockaddr_in *sender){
     return 1;
 }
 
-struct sockaddr_in* QueueFront() {
+struct sender* QueueFront() {
     return front_index == back_index ? NULL : &(senders[front_index]);
 }
 
@@ -214,4 +217,13 @@ int CreateSocket() {
   }
 
   return s;
+}
+
+char* IntToIP(int ip) {
+  sprintf(ip_str, "%d.%d.%d.%d",
+		  (htonl(ip) & 0xff000000)>>24,
+		  (htonl(ip) & 0x00ff0000)>>16,
+		  (htonl(ip) & 0x0000ff00)>>8,
+		  (htonl(ip) & 0x000000ff));
+  return ip_str;
 }

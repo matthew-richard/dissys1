@@ -3,8 +3,10 @@
 
 #define NAME_LENGTH 80
 #define TIMEOUT_SEC 10
+#define TIMEOUT_USEC 0
 
 int sock;
+struct timeval timeout;
 char mess_buf[MAX_MESS_LEN];
 struct sockaddr_in send_addr;
 struct dataMessage connectMsg;
@@ -14,7 +16,10 @@ struct dataMessage window[WINDOW_SIZE];
 int window_start = 0;
 unsigned char window_sent[WINDOW_SIZE] = { '\0' };
 
-int loss_rate_percent = strtol(argv[1], NULL, 10);
+FILE *fr; //file to be read
+unsigned int last_seqNo = -1;
+
+int loss_rate_percent;
 char* src_file_name;
 char* dest_file_name;
 char* rcv_name;
@@ -32,8 +37,8 @@ int main(int argc, char **argv)
     }
     loss_rate_percent = strtol(argv[1], NULL, 10);
     src_file_name = argv[2];
-    dest_file_name = strtok(argv[3], (const char*) '@');
-    rcv_name = strtok(NULL, (const char*) '@');
+    dest_file_name = strtok(argv[3], "@");
+    rcv_name = strtok(NULL, "@");
     
     // Resolve receiver IP address
     struct hostent h_ent; 
@@ -61,9 +66,6 @@ int main(int argc, char **argv)
     printf("Connect message data field is %s\n", connectMsg.data);
 
     fd_set mask, dummy_mask, temp_mask;
-    struct timeval timeout;
-    timeout.tv_sec = TIMEOUT_SEC;
-    timeout.tv_usec = 0;
     FD_ZERO( &mask );
     FD_ZERO( &dummy_mask );
     FD_SET( sock, &mask );
@@ -75,21 +77,25 @@ int main(int argc, char **argv)
     int waiting = 0;
     while( 1 ) {    
         temp_mask = mask;
+	timeout.tv_sec = TIMEOUT_SEC;
+	timeout.tv_usec = TIMEOUT_USEC;
         int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (fd_num > 0) {
-            recvfrom( sock, mess_buf, sizeof(mess_buf), 0, (struct sockaddr *)&temp_addr, &from_len);
-	    struct ackMessage * msg = (struct ackMessage *) mess_buff;
+	  socklen_t from_len = sizeof(struct sockaddr_in);
+	  struct sockaddr_in temp_addr;
+	  recvfrom( sock, mess_buf, sizeof(mess_buf), 0, (struct sockaddr *)&temp_addr, &from_len);
+	  struct ackMessage * msg = (struct ackMessage *) mess_buf;
 
-	    if (msg->cAck == -2) {
-	      // receiver is busy. wait.
-	      continue;
-	    } else if (msg->cAck == -1) {
-	      // start sending data
-	      break;
-	    } else {
-	      perror("Ncp: Unrecognized cAck value\n");
-	      exit(1);
-	    }
+	  if (msg->cAck == -2) {
+	    // receiver is busy. wait.
+	    continue;
+	  } else if (msg->cAck == -1) {
+	    // start sending data
+	    break;
+	  } else {
+	    perror("Ncp: Unrecognized cAck value\n");
+	    exit(1);
+	  }
         } else {
 	  if (!waiting) {
 	    // On timeout, resend connect message
@@ -100,7 +106,6 @@ int main(int argc, char **argv)
 
     
     // Open file
-    FILE *fr; //file to be read
     if((fr = fopen(argv[2], "r")) == NULL) {
         perror("fopen");
         exit(0);
@@ -110,7 +115,6 @@ int main(int argc, char **argv)
 
 
     // Fill and send first window
-    unsigned int last_seqNo = -1;
     for (int i = 0; i < WINDOW_SIZE; i++) {
       window[i].seqNo = i;
       window[i].numBytes = fread(window[i].data, 1, CHUNK_SIZE, fr);
@@ -130,9 +134,10 @@ int main(int argc, char **argv)
     // Proceed to send remainder of file
     while(1) {
       temp_mask = mask;
+      timeout.tv_sec = TIMEOUT_SEC;
+      timeout.tv_usec = TIMEOUT_USEC;
       int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
       if (fd_num > 0) {
-	for (int i = 0; i < WINDOW_SIZE; i++) window_sent[i] = 0;
 	socklen_t from_len = sizeof(struct sockaddr_in);
 	struct sockaddr_in temp_addr;
 	int bytes = recvfrom( sock, mess_buf, sizeof(mess_buf), 0,
@@ -143,27 +148,33 @@ int main(int argc, char **argv)
 	if( temp_addr.sin_addr.s_addr != send_addr.sin_addr.s_addr ) continue;
 
 	// If received cAck for the last sequence, break.
-	if (msg->cAck = last_seqNo) break;
+	if (msg->cAck == last_seqNo) break;
 
 	// Discard messages that are "behind" the current window state
 	if (msg->cAck < window[window_start].seqNo) continue;
+
+	// Zero window_sent
+	for (int i = 0; i < WINDOW_SIZE; i++) window_sent[i] = 0;
 
 	// Shift window according to cAck. Read in and send new packets
 	while(window[window_start].seqNo <= msg->cAck) {
 	  window_start = (window_start + 1) % WINDOW_SIZE;
 	  int index = (window_start + (WINDOW_SIZE -1)) % WINDOW_SIZE;
 	  window[index].seqNo = window[window_start].seqNo + WINDOW_SIZE - 1;
-	  window[index].numBytes = fread(window[i].data, 1, CHUNK_SIZE, fr);
+	  window[index].numBytes = fread(window[index].data, 1, CHUNK_SIZE, fr);
 
+	  // Send packets, marking end of file as either the first fread() call that
+	  // returns less  than CHUNK_SIZE bytes, or the packet before the first fread()
+	  // call that returns 0 bytes.
 	  if (window[index].numBytes > 0) {
 	    sendto( sock, &window[index], sizeof(struct dataMessage), 0, (struct sockaddr *) &send_addr, sizeof(send_addr));
 	    window_sent[index] = 1;
 	    if (window[index].numBytes < CHUNK_SIZE)  last_seqNo = window[index].seqNo;
-	  } else {
+	  } else if (last_seqNo == -1) {
 	    last_seqNo = window[index].seqNo - 1;
 	  }
 
-	  if (window[index].numBytes < CHUNK_SIZE) break;
+	  //if (window[index].numBytes < CHUNK_SIZE) { printf("numBytes: %d, last_seqNo: %d\n", window[index].numBytes, last_seqNo); }// break; }
 	}
 
 	// Resend nAcked packets
@@ -175,7 +186,7 @@ int main(int argc, char **argv)
 	  }
 	}
       } else {
-	// On timeout, esend previously sent packets
+	// On timeout, resend previously sent packets
 	for (int i = 0; i < WINDOW_SIZE; i++) {
 	  if (window_sent[i]) {
 	    sendto( sock, &window[i], sizeof(struct dataMessage), 0, (struct sockaddr *) &send_addr, sizeof(send_addr));
@@ -192,6 +203,8 @@ int main(int argc, char **argv)
       sendto( sock, &disconnectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
       
       temp_mask = mask;
+      timeout.tv_sec = TIMEOUT_SEC;
+      timeout.tv_usec = TIMEOUT_USEC;
       int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
       if (fd_num > 0) {
 	socklen_t from_len = sizeof(struct sockaddr_in);
