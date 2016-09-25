@@ -15,7 +15,7 @@ FILE *fw = NULL;
 struct ackMessage ackMsg;
 
 // Queue of senders.
-struct sender { sockaddr_in addr; char file[NAME_LENGTH}; };
+struct sender { sockaddr_in addr; char file[NAME_LENGTH]; };
 struct sender senders[MAX_SENDERS];
 int front_index = 0;
 int back_index = 0;
@@ -38,11 +38,6 @@ int main(int argc, char **argv)
     timeout.tv_sec = TIMEOUT_SEC;
     timeout.tv_usec = 0;
 
-    //file copy boiler plate code
-    int nwritten, nread;
-
-    
-
     FD_ZERO( &mask );
     FD_ZERO( &dummy_mask );
     FD_SET( sock, &mask);
@@ -60,6 +55,42 @@ int main(int argc, char **argv)
 		  struct dataMessage* msg = (struct dataMessage*) mess_buf;
 		  printf("Data: %s\n", msg->data);
 
+		  // Received disconnect message
+		  if (msg->seqNo == -2) {
+			if (QueueFront() != NULL && temp_addr.sin_addr.s_addr == QueueFront()->addr.sin_addr.s_addr) {
+			  PopFromQueue();
+			  fclose(fw);
+			  
+			  // Reset window state
+			  for (int i = 0; i < WINDOW_SIZE; i++) {
+				window_received[i] = 0;
+				window_base = 0;
+				window_start = 0;
+			  }
+
+			  if (QueueFront() != NULL) {
+				// Open file
+				if((fw = fopen(QueueFront()->file, "w")) == NULL) {
+				  perror("fopen");
+				  exit(0);
+				}
+
+				printf("Opened file %s\n", QueueFront()->file);
+
+				// Send ack
+				ackMsg.cAck = -1;
+				sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &(QueueFront()->addr), sizeof(QueueFront()->addr));
+				printf("Sent ACK message\n");
+			  }
+			}
+
+			// Send response regardless of whether this is the sender we're currently serving
+			struct ackMesssage disconnectMsg;
+			disconnectMsg.cAck = -3;
+			sendto( sock, disconnectMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &temp_addr, sizeof(temp_addr));
+			continue;
+		  }
+
 
 		  if (QueueFront() == NULL) {
 			printf("Adding to queue\n");
@@ -71,7 +102,7 @@ int main(int argc, char **argv)
 
 		  if (temp_addr.sin_addr.s_addr == QueueFront()->addr.sin_addr.s_addr) {
 			printf("IPs equal\n");
-			// Do processing
+			
 			if (msg->seqNo == -1) {
 			  // Connect message
 			  
@@ -87,17 +118,9 @@ int main(int argc, char **argv)
 
 			  // Send ack
 			  ackMsg.cAck = -1;
-			  sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &QueueFront()->addr, sizeof(QueueFront()->addr));
+			  sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &(QueueFront()->addr), sizeof(QueueFront()->addr));
 			  printf("Sent ACK message\n");
 		  
-			} else if (msg->seqNo == -2) {
-			  // Disconnect message
-
-			  // Pop from queue
-			  // Close file
-			  // Reset window state (includes zeroing out window_received)
-			  // Open new file for next in queue (if there is one)
-			  // Send cAck -1 to next in queue (if there is one)
 			} else {
 			  // Data message
 			  
@@ -129,6 +152,7 @@ int main(int argc, char **argv)
 			  sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &QueueFront()->addr, sizeof(QueueFront()->addr));
 			}
 		  } else {
+			// Queue this sender
 			AddToQueue(&temp_addr);
 			
 			// send BUSY message
@@ -137,42 +161,13 @@ int main(int argc, char **argv)
 			sendto( sock, &busyMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &temp_addr, sizeof(temp_addr));
 			printf("Sent BUSY message\n");
 		  }
-	  
-	  
-		  //mess_buf[bytes] = 0;
-		  //int from_ip = from_addr.sin_addr.s_addr;
-
-		  /*unsigned int sn = 0;
-			memcpy(&sn, mess_buf, sizeof(int));
-
-			printf( "sn: %d", sn);*/
-
-
-		  /*nread = msg->numBytes;
-		  printf("%d\n", nread);
-		  if(nread > 0) {
-			nwritten = fwrite(msg->data, 1, nread, fw);
-		  }
-
-		  if (nwritten < nread) {
-			printf("nwritten<nread\n");
-			exit(0);
-		  }
-		  printf( "Sequence number: %d\n", msg->seqNo );
-		  printf("Data %s\n", msg->data );
-
-		  fclose(fw);*/
-		  /*printf( "Received from (%d.%d.%d.%d): %s\n", 
-			(htonl(from_ip) & 0xff000000)>>24,
-			(htonl(from_ip) & 0x00ff0000)>>16,
-			(htonl(from_ip) & 0x0000ff00)>>8,
-			(htonl(from_ip) & 0x000000ff),
-			mess_buf );*/
 		}
       } else {
 		// On timeout, resend previous message
-		sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &QueueFront()->addr, sizeof(QueueFront()->addr));
-		printf("Timed out!\n");
+		if (QueueFront() != NULL) {
+		  sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &QueueFront()->addr, sizeof(QueueFront()->addr));
+		  printf("Timed out!\n");
+		}
 	  }
     }
 }
