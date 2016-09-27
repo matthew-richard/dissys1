@@ -2,226 +2,148 @@
 #include "message_defs.h"
 
 #define NAME_LENGTH 80
-#define TIMEOUT_SEC 10
+#define TIMEOUT_SEC 1
 #define TIMEOUT_USEC 0
 
-int sock;
-struct timeval timeout;
-char mess_buf[MAX_MESS_LEN];
-struct sockaddr_in send_addr;
-struct dataMessage connectMsg;
-struct dataMessage disconnectMsg;
+int sock; // Socket
+struct ackMessage msg; // Latest message from receiver
+struct sockaddr_in rcv_addr;
 
 struct dataMessage window[WINDOW_SIZE];
-int window_start = 0;
-unsigned char window_sent[WINDOW_SIZE] = { '\0' };
+int window_start = 0; // Index in `window` corresponding to earliest sequence
 
-FILE *fr; //file to be read
-unsigned int last_seqNo = -1;
+FILE *fr; // File to be read
+unsigned int last_seq = -1; // Number of last sequence in file
 
+// Args
 int loss_rate_percent;
 char* src_file_name;
 char* dest_file_name;
 char* rcv_name;
 
 int  CreateSocket();
+void InitializeRcv();
+void ParseArguments();
+
+void Send(struct dataMessage *);
+void ReadAndSendWindowSeq(int index);
+int Receive();
+int Select();
 
 int main(int argc, char **argv)
 {
     sock = CreateSocket();
-
-    // Parse arguments
-    if (argc != 4) {
-      printf("Ncp: Wrong number of arguments");
-      exit(1);
-    }
-    loss_rate_percent = strtol(argv[1], NULL, 10);
-    src_file_name = argv[2];
-    dest_file_name = strtok(argv[3], "@");
-    rcv_name = strtok(NULL, "@");
-    
-    // Resolve receiver IP address
-    struct hostent h_ent; 
-    struct hostent *p_h_ent = gethostbyname(rcv_name);
-    if ( p_h_ent == NULL ) {
-        printf("Ncp: gethostbyname error.\n");
-        exit(1);
-    }
-
-    int host_num;
-    memcpy( &h_ent, p_h_ent, sizeof(h_ent));
-    memcpy( &host_num, h_ent.h_addr_list[0], sizeof(host_num) );
-
-    send_addr.sin_family = AF_INET;
-    send_addr.sin_addr.s_addr = host_num;
-    send_addr.sin_port = htons(PORT);
-
-
-    // Create connect message
-    connectMsg.seqNo = -1;
-    connectMsg.numBytes = strlen(dest_file_name) + 1;
-
-    // Copy dest_file_name string, including \0 at end.
-    memcpy(connectMsg.data, dest_file_name, strlen(dest_file_name) + 1);
-    printf("Connect message data field is %s\n", connectMsg.data);
-
-    fd_set mask, dummy_mask, temp_mask;
-    FD_ZERO( &mask );
-    FD_ZERO( &dummy_mask );
-    FD_SET( sock, &mask );
+    ParseArguments(argc, argv);
+    InitializeRcv();
 
     // Send connect message
-    sendto( sock, &connectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
-    
-    // Confirm connection with receiver
-    int waiting = 0;
-    while( 1 ) {    
-        temp_mask = mask;
-	timeout.tv_sec = TIMEOUT_SEC;
-	timeout.tv_usec = TIMEOUT_USEC;
-        int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
-        if (fd_num > 0) {
-	  socklen_t from_len = sizeof(struct sockaddr_in);
-	  struct sockaddr_in temp_addr;
-	  recvfrom( sock, mess_buf, sizeof(mess_buf), 0, (struct sockaddr *)&temp_addr, &from_len);
-	  struct ackMessage * msg = (struct ackMessage *) mess_buf;
+    struct dataMessage connectMsg;
+    connectMsg.seqNo = -1;
+    connectMsg.numBytes = strlen(dest_file_name) + 1;
+    memcpy(connectMsg.data, dest_file_name, strlen(dest_file_name) + 1);
+    Send(&connectMsg);
 
-	  if (msg->cAck == -2) {
-	    // receiver is busy. wait.
-	    continue;
-	  } else if (msg->cAck == -1) {
-	    // start sending data
-	    break;
-	  } else {
-	    perror("Ncp: Unrecognized cAck value\n");
-	    exit(1);
-	  }
-        } else {
-	  if (!waiting) {
-	    // On timeout, resend connect message
-	    sendto( sock, &connectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
-	  }
-	}
+
+    // Confirm connection with receiver
+    char waiting = 0;
+    while( 1 ) {    
+      int fd_num = Select();
+
+      // If timeout, resend connect message
+      if (fd_num == 0 && !waiting) {
+	Send(&connectMsg);
+	continue;
+      }
+
+      // Receive, ignoring messages from other IPs
+      if ( !Receive() ) continue;
+ 
+      if (msg.cAck == -2) {
+	// Receiver busy
+	continue;
+      }
+      else if (msg.cAck == -1) {
+	// Receiver ready
+	break;
+      }
+      else {
+	perror("Ncp: Unrecognized cAck value\n");
+	exit(1);
+      }
     }
 
     
     // Open file
-    if((fr = fopen(argv[2], "r")) == NULL) {
+    if((fr = fopen(src_file_name, "r")) == NULL) {
         perror("fopen");
         exit(0);
     }
 
-    printf("Opened file for reading");
-
-
-    // Fill and send first window
+    // Send first window
     for (int i = 0; i < WINDOW_SIZE; i++) {
       window[i].seqNo = i;
-      window[i].numBytes = fread(window[i].data, 1, CHUNK_SIZE, fr);
-
-      if (window[i].numBytes > 0) {
-	sendto( sock, &window[i], sizeof(struct dataMessage), 0, (struct sockaddr *) &send_addr, sizeof(send_addr));
-	window_sent[i] = 1;
-	if (window[i].numBytes < CHUNK_SIZE)  last_seqNo = window[i].seqNo;
-      } else {
-	last_seqNo = window[i].seqNo - 1;
-      }
-
-      if (window[i].numBytes < CHUNK_SIZE) break;
+      ReadAndSendWindowSeq(i);
     }
     
     
-    // Proceed to send remainder of file
+    // Send remainder of file
     while(1) {
-      temp_mask = mask;
-      timeout.tv_sec = TIMEOUT_SEC;
-      timeout.tv_usec = TIMEOUT_USEC;
-      int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
-      if (fd_num > 0) {
-	socklen_t from_len = sizeof(struct sockaddr_in);
-	struct sockaddr_in temp_addr;
-	int bytes = recvfrom( sock, mess_buf, sizeof(mess_buf), 0,
-			      (struct sockaddr *)&temp_addr, &from_len);
-	struct ackMessage* msg = (struct ackMessage*) mess_buf;
+      int fd_num = Select();
 
-	// Discard messages from other IPs
-	if( temp_addr.sin_addr.s_addr != send_addr.sin_addr.s_addr ) continue;
+      // If timeout, continue waiting
+      if (fd_num == 0) continue;
+	
+      // Receive message, ignoring messages from other IPs
+      if ( !Receive() ) continue;
 
-	// If received cAck for the last sequence, break.
-	if (msg->cAck == last_seqNo) break;
+      // Discard messages that are "behind" the current window state
+      if (msg.cAck < window[window_start].seqNo) continue;
 
-	// Discard messages that are "behind" the current window state
-	if (msg->cAck < window[window_start].seqNo) continue;
+      
+      // Shift window past cAck. Send new sequences that appear
+      // at the end of the window.
+      while(window[window_start].seqNo <= msg.cAck) {
+	window_start = (window_start + 1) % WINDOW_SIZE;
+	
+	int index = (window_start + (WINDOW_SIZE - 1)) % WINDOW_SIZE;
+	window[index].seqNo = window[window_start].seqNo + WINDOW_SIZE - 1;
+	ReadAndSendWindowSeq(index);
+      }
 
-	// Zero window_sent
-	for (int i = 0; i < WINDOW_SIZE; i++) window_sent[i] = 0;
+      // If receiving cAck for the final sequence, break.
+      if (msg.cAck == last_seq) break;
 
-	// Shift window according to cAck. Read in and send new packets
-	while(window[window_start].seqNo <= msg->cAck) {
-	  window_start = (window_start + 1) % WINDOW_SIZE;
-	  int index = (window_start + (WINDOW_SIZE -1)) % WINDOW_SIZE;
-	  window[index].seqNo = window[window_start].seqNo + WINDOW_SIZE - 1;
-	  window[index].numBytes = fread(window[index].data, 1, CHUNK_SIZE, fr);
-
-	  // Send packets, marking end of file as either the first fread() call that
-	  // returns less  than CHUNK_SIZE bytes, or the packet before the first fread()
-	  // call that returns 0 bytes.
-	  if (window[index].numBytes > 0) {
-	    sendto( sock, &window[index], sizeof(struct dataMessage), 0, (struct sockaddr *) &send_addr, sizeof(send_addr));
-	    window_sent[index] = 1;
-	    if (window[index].numBytes < CHUNK_SIZE)  last_seqNo = window[index].seqNo;
-	  } else if (last_seqNo == -1) {
-	    last_seqNo = window[index].seqNo - 1;
-	  }
-
-	  //if (window[index].numBytes < CHUNK_SIZE) { printf("numBytes: %d, last_seqNo: %d\n", window[index].numBytes, last_seqNo); }// break; }
-	}
-
-	// Resend nAcked packets
-	for (int i = 0; i < WINDOW_SIZE; i++) {
-	  int index = (window_start + i) % WINDOW_SIZE;
-	  if (msg->nAcks[i]) {
-	    sendto( sock, &window[index], sizeof(struct dataMessage), 0, (struct sockaddr *) &send_addr, sizeof(send_addr));
-	    window_sent[index] = 1;
-	  }
-	}
-      } else {
-	// On timeout, resend previously sent packets
-	for (int i = 0; i < WINDOW_SIZE; i++) {
-	  if (window_sent[i]) {
-	    sendto( sock, &window[i], sizeof(struct dataMessage), 0, (struct sockaddr *) &send_addr, sizeof(send_addr));
-	  }
+      // Resend nAcked packets
+      for (int i = 0; i < WINDOW_SIZE; i++) {
+	int index = (window_start + i) % WINDOW_SIZE;
+	if (msg.nAcks[i]) {
+	  Send(&window[index]);
 	}
       }
-    } // End while
+    }
 
 
     // Close connection
+    struct dataMessage disconnectMsg;
     disconnectMsg.seqNo = -2;
+    Send(&disconnectMsg);
+
+    // Confirm connection closed
     while(1) {
-      // Ask to disconnect
-      sendto( sock, &disconnectMsg, sizeof(struct dataMessage), 0, (struct sockaddr *)&send_addr, sizeof(send_addr));
-      
-      temp_mask = mask;
-      timeout.tv_sec = TIMEOUT_SEC;
-      timeout.tv_usec = TIMEOUT_USEC;
-      int fd_num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
-      if (fd_num > 0) {
-	socklen_t from_len = sizeof(struct sockaddr_in);
-	struct sockaddr_in temp_addr;
-	int bytes = recvfrom( sock, mess_buf, sizeof(mess_buf), 0,
-			      (struct sockaddr *)&temp_addr, &from_len);
-	struct ackMessage* msg = (struct ackMessage*) mess_buf;
+      int fd_num = Select();
 
-	// Discard messages from other IPs
-	if( temp_addr.sin_addr.s_addr != send_addr.sin_addr.s_addr ) continue;
-
-	// Break upon receiving disconnect ack
-	if (msg->cAck == -3) break;
+      // If timeout, resend disconnect message
+      if (fd_num == 0) {
+	Send(&disconnectMsg);
+	continue;
       }
 
-      // Loop back around on timeout
-      
+      // Receive, ignoring messages from other IPs
+      if ( !Receive() ) continue;
+
+      // Break upon receiving disconnect ack
+      if (msg.cAck == -3) break;
+
     } // End while
 
 
@@ -248,4 +170,84 @@ int CreateSocket() {
   }
 
   return s;
+}
+
+void Send(struct dataMessage * seq) {
+  sendto( sock, seq, sizeof(struct dataMessage), 0,
+	  (struct sockaddr *)&rcv_addr, sizeof(struct sockaddr_in));
+}
+
+int Receive() {
+  socklen_t from_len = sizeof(struct sockaddr_in);
+  struct sockaddr_in temp_addr;
+  recvfrom( sock, (char*) &msg, sizeof(struct ackMessage), 0,
+	    (struct sockaddr *)&temp_addr, &from_len);
+
+  // Discard messages from other IPs
+  if( temp_addr.sin_addr.s_addr == rcv_addr.sin_addr.s_addr )
+    return 1;
+  else
+    return 0;
+}
+
+int Select() {
+  fd_set mask, dummy_mask, temp_mask;
+  struct timeval timeout;
+  
+  FD_ZERO( &mask );
+  FD_ZERO( &dummy_mask );
+  FD_SET( sock, &mask );
+
+  temp_mask = mask;
+  timeout.tv_sec = TIMEOUT_SEC;
+  timeout.tv_usec = TIMEOUT_USEC;
+	
+  return select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
+}
+
+void ReadAndSendWindowSeq(int index) {
+  window[index].numBytes = fread(window[index].data, 1, SEQ_SIZE, fr);
+
+  // Send sequence. Mark end of file if the fread() call
+  // returned less than SEQ_SIZE bytes
+  if (window[index].numBytes > 0) {
+    Send(&window[index]);
+    if (window[index].numBytes < SEQ_SIZE) {
+      last_seq = window[index].seqNo;
+    }
+  }
+  else if (last_seq == -1) {
+    // Mark previous sequence as last if current sequence is 0 bytes
+    last_seq = window[index].seqNo - 1;
+  }
+}
+
+void InitializeRcv() {
+  // Resolve receiver IP address
+  struct hostent h_ent; 
+  struct hostent *p_h_ent = gethostbyname(rcv_name);
+  if ( p_h_ent == NULL ) {
+    printf("Ncp: gethostbyname error.\n");
+    exit(1);
+  }
+
+  int host_num;
+  memcpy( &h_ent, p_h_ent, sizeof(h_ent));
+  memcpy( &host_num, h_ent.h_addr_list[0], sizeof(host_num) );
+
+  rcv_addr.sin_family = AF_INET;
+  rcv_addr.sin_addr.s_addr = host_num;
+  rcv_addr.sin_port = htons(PORT);
+}
+
+void ParseArguments(int argc, char** argv) {
+  // Parse arguments
+  if (argc != 4) {
+    printf("Ncp: Wrong number of arguments");
+    exit(1);
+  }
+  loss_rate_percent = strtol(argv[1], NULL, 10);
+  src_file_name = argv[2];
+  dest_file_name = strtok(argv[3], "@");
+  rcv_name = strtok(NULL, "@");
 }

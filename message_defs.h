@@ -1,11 +1,11 @@
 #define WINDOW_SIZE 512
-#define CHUNK_SIZE 1024
+#define SEQ_SIZE 1024
 
 
 struct dataMessage {
     unsigned int seqNo;
     unsigned int numBytes;
-    unsigned char data[CHUNK_SIZE];
+    unsigned char data[SEQ_SIZE];
 };
 
 struct ackMessage {
