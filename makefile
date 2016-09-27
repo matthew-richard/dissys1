@@ -5,11 +5,11 @@ CFLAGS = -g -c -Wall -pedantic
 
 all: rcv ncp
 
-rcv: rcv.o
-	    $(CC) -o rcv rcv.o  
+rcv: rcv.o sendto_dbg.o
+	    $(CC) -o rcv rcv.o sendto_dbg.o  
 
-ncp: ncp.o
-	    $(CC) -o ncp ncp.o
+ncp: ncp.o sendto_dbg.o
+	    $(CC) -o ncp ncp.o sendto_dbg.o
 
 clean:
 	rm *.o

@@ -1,5 +1,6 @@
 #include "net_include.h"
 #include "message_defs.h"
+#include "sendto_dbg.h"
 
 #define NAME_LENGTH 80
 #define TIMEOUT_SEC 1
@@ -35,6 +36,8 @@ int main(int argc, char **argv)
     sock = CreateSocket();
     ParseArguments(argc, argv);
     InitializeRcv();
+
+    sendto_dbg_init(loss_rate_percent);
 
     // Send connect message
     struct dataMessage connectMsg;
@@ -173,7 +176,7 @@ int CreateSocket() {
 }
 
 void Send(struct dataMessage * seq) {
-  sendto( sock, seq, sizeof(struct dataMessage), 0,
+  sendto_dbg( sock, (char*) seq, sizeof(struct dataMessage), 0,
 	  (struct sockaddr *)&rcv_addr, sizeof(struct sockaddr_in));
 }
 

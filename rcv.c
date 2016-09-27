@@ -1,5 +1,6 @@
 #include "net_include.h"
 #include "message_defs.h"
+#include "sendto_dbg.h"
 
 #define NAME_LENGTH 80
 #define MAX_SENDERS 512
@@ -46,6 +47,8 @@ int main(int argc, char **argv)
     sock = CreateSocket();
 	ResetWindow();
 	ParseArguments(argc, argv);
+	
+	sendto_dbg_init(loss_rate_percent);
     
     while(1) {
       int fd_num = Select();
@@ -255,12 +258,12 @@ void ShiftWindow() {
 
 
 void SendToCurrent(struct ackMessage * ack) {
-  sendto( sock, ack, sizeof(struct ackMessage), 0,
+  sendto_dbg( sock, (char*) ack, sizeof(struct ackMessage), 0,
 		  (struct sockaddr *)&(QueueFront()->addr), sizeof(struct sockaddr_in));
 }
 
 void Send(struct ackMessage * ack, struct sockaddr_in * addr) {
-  sendto( sock, ack, sizeof(struct ackMessage), 0,
+  sendto_dbg( sock, (char*) ack, sizeof(struct ackMessage), 0,
 		  (struct sockaddr *)addr, sizeof(struct sockaddr_in));
 }
 

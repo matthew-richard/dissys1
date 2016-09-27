@@ -1,4 +1,4 @@
-#define WINDOW_SIZE 512
+#define WINDOW_SIZE 8
 #define SEQ_SIZE 1024
 
 
