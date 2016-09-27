@@ -9,6 +9,7 @@
 #include <sys/select.h>
 #include <netinet/in.h> 
 #include <netdb.h>
+#include <time.h>
 
 #include <errno.h>
 
