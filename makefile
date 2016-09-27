@@ -5,8 +5,8 @@ CFLAGS = -g -c -Wall -pedantic
 
 all: rcp ncp
 
-rcp: rcp.o
-	    $(CC) -o rcp rcp.o  
+rcv: rcv.o
+	    $(CC) -o rcv rcv.o  
 
 ncp: ncp.o
 	    $(CC) -o ncp ncp.o
@@ -14,7 +14,7 @@ ncp: ncp.o
 clean:
 	rm *.o
 	rm ncp
-	rm rcp
+	rm rcv
 
 %.o:    %.c
 	$(CC) $(CFLAGS) $*.c
