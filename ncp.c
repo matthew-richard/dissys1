@@ -3,8 +3,6 @@
 #include "sendto_dbg.h"
 
 #define NAME_LENGTH 80
-#define TIMEOUT_SEC 1
-#define TIMEOUT_USEC 0
 
 int sock; // Socket
 struct ackMessage msg; // Latest message from receiver
@@ -21,6 +19,7 @@ int loss_rate_percent;
 char* src_file_name;
 char* dest_file_name;
 char* rcv_name;
+char verbose = 0;
 
 int  CreateSocket();
 void InitializeRcv();
@@ -39,12 +38,22 @@ int main(int argc, char **argv)
 
     sendto_dbg_init(loss_rate_percent);
 
+    // Open file
+    if((fr = fopen(src_file_name, "r")) == NULL) {
+      perror("fopen");
+      exit(0);
+    }
+
+    if (verbose) printf("Successfully opened file %s\n", src_file_name);
+
     // Send connect message
     struct dataMessage connectMsg;
     connectMsg.seqNo = -1;
     connectMsg.numBytes = strlen(dest_file_name) + 1;
     memcpy(connectMsg.data, dest_file_name, strlen(dest_file_name) + 1);
     Send(&connectMsg);
+
+    if (verbose) printf("Sent connect msg. Dest file name: %s\n", connectMsg.data);
 
 
     // Confirm connection with receiver
@@ -75,18 +84,15 @@ int main(int argc, char **argv)
       }
     }
 
-    
-    // Open file
-    if((fr = fopen(src_file_name, "r")) == NULL) {
-        perror("fopen");
-        exit(0);
-    }
+    if (verbose) printf("Connection established\n");
 
     // Send first window
     for (int i = 0; i < WINDOW_SIZE; i++) {
       window[i].seqNo = i;
       ReadAndSendWindowSeq(i);
     }
+
+    if (verbose) printf("Sent first window. last_seq = %d\n", (int) last_seq);
     
     
     // Send remainder of file
@@ -94,27 +100,34 @@ int main(int argc, char **argv)
       int fd_num = Select();
 
       // If timeout, continue waiting
-      if (fd_num == 0) continue;
+      if (fd_num == 0) {
+	if (verbose) printf("Timeout. base = %d, last_seq = %d\n", window[window_start].seqNo - 1, (int) last_seq);
+	continue;
+      }
 	
       // Receive message, ignoring messages from other IPs
       if ( !Receive() ) continue;
 
+      if (verbose) printf("cAck: %d\n", msg.cAck);
+
       // Discard messages that are "behind" the current window state
-      if (msg.cAck < window[window_start].seqNo) continue;
+      if (window[window_start].seqNo != 0 && msg.cAck < window[window_start].seqNo - 1) continue;
 
       
       // Shift window past cAck. Send new sequences that appear
       // at the end of the window.
-      while(window[window_start].seqNo <= msg.cAck) {
-	window_start = (window_start + 1) % WINDOW_SIZE;
+      if (msg.cAck != -1) {
+	while(window[window_start].seqNo <= msg.cAck) {
+	  window_start = (window_start + 1) % WINDOW_SIZE;
 	
-	int index = (window_start + (WINDOW_SIZE - 1)) % WINDOW_SIZE;
-	window[index].seqNo = window[window_start].seqNo + WINDOW_SIZE - 1;
-	ReadAndSendWindowSeq(index);
+	  int index = (window_start + (WINDOW_SIZE - 1)) % WINDOW_SIZE;
+	  window[index].seqNo = window[window_start].seqNo + WINDOW_SIZE - 1;
+	  ReadAndSendWindowSeq(index);
+	}
       }
 
       // If receiving cAck for the final sequence, break.
-      if (msg.cAck == last_seq) break;
+      if (msg.cAck != -1 && msg.cAck == last_seq) break;
 
       // Resend nAcked packets
       for (int i = 0; i < WINDOW_SIZE; i++) {
@@ -131,6 +144,8 @@ int main(int argc, char **argv)
     disconnectMsg.seqNo = -2;
     Send(&disconnectMsg);
 
+    if (verbose) printf("Sent disconnect message. last_seq = %d\n", (int) last_seq);
+
     // Confirm connection closed
     while(1) {
       int fd_num = Select();
@@ -138,6 +153,7 @@ int main(int argc, char **argv)
       // If timeout, resend disconnect message
       if (fd_num == 0) {
 	Send(&disconnectMsg);
+	if (verbose) printf("Resent disconnect message. last_seq = %d\n", (int) last_seq);
 	continue;
       }
 
@@ -245,7 +261,7 @@ void InitializeRcv() {
 
 void ParseArguments(int argc, char** argv) {
   // Parse arguments
-  if (argc != 4) {
+  if (argc < 4) {
     printf("Ncp: Wrong number of arguments");
     exit(1);
   }
@@ -253,4 +269,8 @@ void ParseArguments(int argc, char** argv) {
   src_file_name = argv[2];
   dest_file_name = strtok(argv[3], "@");
   rcv_name = strtok(NULL, "@");
+
+  if (argc > 4 && ( !strcmp(argv[4], "-v") || !strcmp(argv[4], "v" ) ) ) {
+      verbose = 1;
+  }
 }

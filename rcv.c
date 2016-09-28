@@ -4,8 +4,6 @@
 
 #define NAME_LENGTH 80
 #define MAX_SENDERS 512
-#define TIMEOUT_SEC 1
-#define TIMEOUT_USEC 0
 
 int sock; // Socket
 int loss_rate_percent; // Command line arg
@@ -54,8 +52,11 @@ int main(int argc, char **argv)
       int fd_num = Select();
 
 	  // If timeout, send cAcks and nAcks for missing messages
-	  if (fd_num == 0 && QueueFront() != NULL) {
-		ShiftWindow();
+	  if (fd_num == 0) {
+		if (QueueFront() != NULL) {
+		  ShiftWindow();
+		}
+		continue;
 	  }
 
 	  // Receive message into `msg`
@@ -95,7 +96,7 @@ int main(int argc, char **argv)
 	  }
 
 
-	  // Serve sender if we're not serving anyone
+	  // Serve sender of msg if we're not serving anyone
 	  if (QueueFront() == NULL) {
 		struct sender sndr;
 		sndr.addr = temp_addr;
@@ -163,8 +164,7 @@ int PopFromQueue() {
 int AddToQueue(struct sender *sender){
     //check if sender is already in the queue
 
-    int i;
-    for (i = front_index; i < back_index; i = (i + 1) % MAX_SENDERS ) {
+    for (int i = front_index; i < back_index; i = (i + 1) % MAX_SENDERS ) {
       if (senders[i].addr.sin_addr.s_addr == sender->addr.sin_addr.s_addr) {
 	    return 0;
 	  }
@@ -253,7 +253,7 @@ void ShiftWindow() {
   for (int i = WINDOW_SIZE - num_shifted; i < WINDOW_SIZE; i++) {
 	ackMsg.nAcks[i] = 0;
   }
-  sendto( sock, &ackMsg, sizeof(struct ackMessage), 0, (struct sockaddr *) &QueueFront()->addr, sizeof(QueueFront()->addr));
+  SendToCurrent(&ackMsg);
 }
 
 
@@ -270,7 +270,7 @@ void Send(struct ackMessage * ack, struct sockaddr_in * addr) {
 struct sockaddr_in Receive() {
   socklen_t from_len = sizeof(struct sockaddr_in);
   struct sockaddr_in temp_addr;
-  recvfrom( sock, (char*) &msg, sizeof(struct ackMessage), 0,
+  recvfrom( sock, (char*) &msg, sizeof(struct dataMessage), 0,
 	    (struct sockaddr *)&temp_addr, &from_len);
 
   return temp_addr;

@@ -1,5 +1,8 @@
-#define WINDOW_SIZE 8
+#define WINDOW_SIZE 1024
 #define SEQ_SIZE 1024
+#define TIMEOUT_SEC 0
+#define TIMEOUT_USEC 2000
+
 
 
 struct dataMessage {
